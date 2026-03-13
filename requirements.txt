@@ -1,0 +1,20 @@
+# Core
+openai>=1.30.0
+typer>=0.12.0
+rich>=13.7.0
+pyyaml>=6.0
+requests>=2.31.0
+
+# Static analysis
+ruff>=0.4.0
+bandit>=1.7.0
+
+# GUI
+PyQt5>=5.15.10
+
+# Testing
+pytest>=8.0.0
+pytest-qt>=4.4.0
+
+# Optional for reports
+jinja2>=3.1.0

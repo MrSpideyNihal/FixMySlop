@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "fixmyslop"
+version = "0.2.0"
+description = "AI wrote your code. FixMySlop fixes it."
+license = {text = "MIT"}
+requires-python = ">=3.10"
+readme = "README.md"
+authors = [
+    {name = "FixMySlop Contributors"},
+]
+keywords = ["code-audit", "ai", "static-analysis", "llm", "security"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "openai>=1.30.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "pyyaml>=6.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+gui = ["PyQt5>=5.15.10"]
+analysis = ["ruff>=0.4.0", "bandit>=1.7.0"]
+dev = ["pytest>=8.0.0", "pytest-qt>=4.4.0"]
+
+[project.scripts]
+fixmyslop = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/MrSpideyNihal/FixMySlop"
+Repository = "https://github.com/MrSpideyNihal/FixMySlop"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

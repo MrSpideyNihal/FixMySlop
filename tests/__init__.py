@@ -1,0 +1,3 @@
+"""
+FixMySlop test suite.
+"""
