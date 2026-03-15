@@ -197,4 +197,4 @@ MIT — free forever, fully open source.
 
 ---
 
-**Built by [FixMySlop Contributors](https://github.com/MrSpideyNihal/FixMySlop)**
+
