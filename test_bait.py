@@ -1,6 +1,7 @@
 """
 Test bait — maximum AI slop for FixMySlop testing.
 Every bad pattern known to mankind.
+We can add more
 """
 import os
 import sys
