@@ -17,6 +17,7 @@ from core.report_builder import ReportBuilder
 from core.issue import Issue, ScanReport
 from utils.config import Config
 from utils.logger import get_logger
+from macros import SCAN_MODE_TURBO, SCAN_MODE_DEEP
 import time
 
 logger = get_logger(__name__)
@@ -29,11 +30,13 @@ class ScanWorker(QObject):
     complete = pyqtSignal(object)             # ScanReport
     failed = pyqtSignal(str)                  # error message
 
-    def __init__(self, repo_path: str, config: Config):
-        """Initialize scan worker with repo path and config."""
+    def __init__(self, repo_path: str, config: Config, model: str, scan_mode: str):
+        """Initialize scan worker with repo path, config, model snapshot, and mode."""
         super().__init__()
         self.repo_path = repo_path
         self.config = config
+        self.model = model
+        self.scan_mode = scan_mode
 
     def run(self):
         """Execute the full scan pipeline."""
@@ -43,7 +46,7 @@ class ScanWorker(QObject):
                 client = LLMClient(
                     base_url=self.config.base_url,
                     api_key=self.config.api_key,
-                    model=self.config.model,
+                    model=self.model,
                 )
                 if not client.is_available():
                     self.failed.emit(
@@ -56,6 +59,7 @@ class ScanWorker(QObject):
             analyzer = Analyzer(
                 llm_client=client,
                 use_static_tools=self.config.get("use_ruff", True),
+                scan_mode=self.scan_mode,
             )
             builder = ReportBuilder()
             all_issues: list[Issue] = []
@@ -73,7 +77,8 @@ class ScanWorker(QObject):
                 total_files=scanner.file_count,
                 scanned_files=scanner.file_count,
                 scan_time_s=time.time() - start,
-                model_used=self.config.model,
+                model_used=self.model,
+                scan_mode=self.scan_mode,
             )
             self.complete.emit(report)
         except Exception as e:
@@ -91,6 +96,7 @@ class ScanPanel(QWidget):
         """Initialize scan panel with config."""
         super().__init__(parent)
         self.config = config
+        self._scan_mode = SCAN_MODE_TURBO
         self._thread = None
         self._worker = None
         self._build_ui()
@@ -139,6 +145,51 @@ class ScanPanel(QWidget):
         self.model_selector = ModelSelectorWidget(self.config)
         self.model_selector.model_changed.connect(self._update_estimate)
         layout.addWidget(self.model_selector)
+
+        # Scan mode toggle
+        mode_label = QLabel("Scan Mode")
+        mode_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(mode_label)
+
+        mode_row = QHBoxLayout()
+        mode_btn_style = (
+            "QPushButton {"
+            "border: 1px solid #4a5568; border-radius: 10px; "
+            "background: transparent; color: #a0aec0; "
+            "padding: 8px 14px; font-weight: 600;"
+            "}"
+            "QPushButton:checked {"
+            "background: #7c3aed; border: 1px solid #7c3aed; color: #ffffff;"
+            "}"
+        )
+
+        self.turbo_mode_btn = QPushButton("⚡ Turbo")
+        self.deep_mode_btn = QPushButton("🔍 Deep")
+        for btn in (self.turbo_mode_btn, self.deep_mode_btn):
+            btn.setCheckable(True)
+            btn.setFixedHeight(36)
+            btn.setStyleSheet(mode_btn_style)
+
+        self.turbo_mode_btn.clicked.connect(
+            lambda _checked: self._set_scan_mode(SCAN_MODE_TURBO)
+        )
+        self.deep_mode_btn.clicked.connect(
+            lambda _checked: self._set_scan_mode(SCAN_MODE_DEEP)
+        )
+
+        mode_row.addWidget(self.turbo_mode_btn)
+        mode_row.addWidget(self.deep_mode_btn)
+        mode_row.addStretch()
+        layout.addLayout(mode_row)
+
+        self.mode_desc_label = QLabel(
+            'Turbo: "Fast scan · Top 10 critical issues · ~30s"\n'
+            'Deep:  "Full analysis · All issues · 2-5 mins"'
+        )
+        self.mode_desc_label.setStyleSheet("color: #8892a4; font-size: 12px;")
+        layout.addWidget(self.mode_desc_label)
+
+        self._set_scan_mode(self._scan_mode)
 
         # Scan estimate label (shown under model selector)
         self.estimate_label = QLabel("")
@@ -201,10 +252,17 @@ class ScanPanel(QWidget):
             self.path_input.setText(path)
             self._update_estimate()
 
+    def _set_scan_mode(self, mode: str):
+        """Update active scan mode from mode toggle buttons."""
+        self._scan_mode = mode if mode in {SCAN_MODE_TURBO, SCAN_MODE_DEEP} else SCAN_MODE_TURBO
+        self.turbo_mode_btn.setChecked(self._scan_mode == SCAN_MODE_TURBO)
+        self.deep_mode_btn.setChecked(self._scan_mode == SCAN_MODE_DEEP)
+        self._update_estimate()
+
     def _update_estimate(self):
         """Refresh the scan time estimate label."""
         path = self.path_input.text().strip()
-        if not path or not self.use_llm.isChecked():
+        if not path:
             self.estimate_label.setVisible(False)
             return
 
@@ -220,12 +278,26 @@ class ScanPanel(QWidget):
             total = scanner.file_count
             model = self.model_selector.selected_model
             gpu = _detect_gpu()
-            est = estimate_scan_time(total, model, gpu["vram_gb"])
+            llm_enabled = self.use_llm.isChecked()
+            est = estimate_scan_time(
+                total,
+                model,
+                gpu["vram_gb"],
+                scan_mode=self._scan_mode,
+                use_llm=llm_enabled,
+            )
+            if llm_enabled:
+                mode_text = "Turbo ⚡" if self._scan_mode == SCAN_MODE_TURBO else "Deep 🔍"
+                tip_text = "Tip: Uncheck LLM Deep Analysis for instant static-only scan"
+            else:
+                mode_text = "Static-only"
+                tip_text = "Tip: Enable LLM Deep Analysis for AI issue detection"
 
             self.estimate_label.setText(
                 f"📊  {total} files  •  {est['hardware']}  •  "
                 f"Estimated: {est['total_human']}\n"
-                f"Tip: Uncheck LLM Deep Analysis for instant static-only scan"
+                f"Mode: {mode_text}\n"
+                f"{tip_text}"
             )
             self.estimate_label.setVisible(True)
         except Exception:
@@ -238,6 +310,39 @@ class ScanPanel(QWidget):
             self.status_label.setText("Please select a folder first.")
             return
 
+        # Validate + auto-detect model before scan starts
+        from core.model_detector import get_best_available_model
+        from core.llm_client import LLMClient
+
+        temp_client = LLMClient(
+            base_url=self.config.base_url,
+            api_key=self.config.api_key,
+            model=self.config.model or "",
+        )
+        if not temp_client.is_available():
+            best = get_best_available_model(self.config.base_url)
+            if best:
+                self.config.set("model", best)
+                self.status_label.setText(
+                    f"Auto-switched model to: {best}"
+                )
+            else:
+                self.status_label.setText(
+                    f"No backend running. "
+                    "Start Ollama first."
+                )
+                return
+        elif temp_client.model != self.config.model:
+            self.config.set("model", temp_client.model)
+            self.status_label.setText(
+                f"Auto-switched model to: {temp_client.model}"
+            )
+
+        selected_model = self.model_selector.selected_model.strip()
+        active_model = selected_model or self.config.model
+        if selected_model and selected_model != self.config.model:
+            self.config.set("model", selected_model)
+
         self.scan_btn.setEnabled(False)
         self.scan_btn.setText("Scanning...")
         self.progress_bar.setVisible(True)
@@ -248,7 +353,7 @@ class ScanPanel(QWidget):
         self.config.set("use_llm", self.use_llm.isChecked())
 
         self._thread = QThread()
-        self._worker = ScanWorker(path, self.config)
+        self._worker = ScanWorker(path, self.config, active_model, self._scan_mode)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._on_progress)

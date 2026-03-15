@@ -14,6 +14,7 @@
 
 ## Features
 
+- ⚡ **Turbo + Deep Modes** — Choose fast top-issue scanning or thorough full analysis
 - 🔍 **Deep Code Scanning** — Walks your repo, respects `.gitignore`, analyzes every file
 - 🛡️ **Security Analysis** — OWASP Top 10, injection, auth issues, exposed secrets (via Bandit + LLM)
 - 🧹 **AI Smell Detection** — Hallucinated imports, broad try/except, missing validation
@@ -22,6 +23,8 @@
 - 📄 **Export Reports** — Markdown, HTML, or JSON
 - 🎨 **Dark & Light Themes** — Premium PyQt5 GUI with smooth UX
 - 💻 **Full CLI** — Works without GUI via `fixmyslop scan ./myrepo`
+- 🤖 **Auto Model Fallback** — Automatically switches to an installed backend model if configured model is missing
+- 🪟 **Windows-safe CLI Output** — Handles PowerShell encoding edge cases gracefully
 - 🏠 **100% Local** — Ollama, llama.cpp, vLLM — your data never leaves your machine
 
 ---
@@ -43,15 +46,18 @@ cd FixMySlop
 # Install dependencies
 pip install -r requirements.txt
 
-# Pull a model (using Ollama)
-ollama pull qwen2.5-coder:7b
+# Pull a model (using Ollama, example)
+ollama pull qwen2.5-coder:3b
 
 # Launch GUI
 python main.py
 
 # Or use CLI
-python main.py scan ./your-project --model qwen2.5-coder:7b
+python main.py scan ./your-project --mode turbo
 ```
+
+FixMySlop can auto-detect a working local model from your backend,
+so manual model configuration is optional in many setups.
 
 ### Optional Tools
 
@@ -85,8 +91,14 @@ This launches the full desktop application with:
 # Scan a repository
 python main.py scan ./myproject
 
-# Scan with specific model
-python main.py scan ./myproject --model codellama:13b
+# Turbo mode (fast, top issues)
+python main.py scan ./myproject --mode turbo
+
+# Deep mode (thorough)
+python main.py scan ./myproject --mode deep
+
+# Scan with a specific model
+python main.py scan ./myproject --model qwen2.5-coder:3b --mode turbo
 
 # Static analysis only (no LLM)
 python main.py scan ./myproject --no-llm
@@ -101,6 +113,19 @@ python main.py models
 python main.py version
 ```
 
+### Scan Modes
+
+| Mode | Focus | Typical per-file estimate |
+|------|-------|---------------------------|
+| `turbo` | Top critical issues quickly | `~20-40s per file` |
+| `deep` | Full, thorough issue discovery | `~15-30s per file` |
+| `--no-llm` | Static analysis only | `< 1s per file` |
+
+Notes:
+- Turbo prioritizes highest-impact findings and keeps output concise.
+- Deep is intended for complete analysis and broader issue coverage.
+- Exact times vary by backend model, machine load, and file complexity.
+
 ---
 
 ## Configuration
@@ -108,7 +133,7 @@ python main.py version
 Config file: `~/.fixmyslop/config.yaml`
 
 ```yaml
-model: qwen2.5-coder:7b
+model: ""
 base_url: http://localhost:11434/v1
 api_key: ollama
 temperature: 0.2
@@ -118,6 +143,8 @@ use_bandit: true
 use_semgrep: false
 auto_backup: true
 ```
+
+If `model` is empty, FixMySlop attempts to auto-select the best available model from your running local backend.
 
 ---
 

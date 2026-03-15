@@ -2,6 +2,28 @@
 CLI output — Rich-powered terminal output for FixMySlop CLI.
 Provides banner, report tables, issue cards, and styled messages.
 """
+import io
+import sys
+import os
+
+if (
+    sys.platform == "win32"
+    and hasattr(sys.stdout, "buffer")
+    and "pytest" not in sys.modules
+    and "PYTEST_CURRENT_TEST" not in os.environ
+):
+    try:
+        current_encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
+        if current_encoding != "utf-8":
+            sys.stdout = io.TextIOWrapper(
+                sys.stdout.buffer,
+                encoding="utf-8",
+                errors="replace",
+                line_buffering=True,
+            )
+    except Exception:
+        pass
+
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -10,6 +32,7 @@ from rich import box
 from macros import (
     SEVERITY_COLORS, SEVERITY_CRITICAL, SEVERITY_HIGH,
     SEVERITY_MEDIUM, SEVERITY_LOW, SEVERITY_INFO,
+    SCAN_MODE_TURBO, SCAN_MODE_DEEP,
 )
 
 console = Console()
@@ -22,6 +45,32 @@ _SEVERITY_STYLES = {
     SEVERITY_LOW: "bold cyan",
     SEVERITY_INFO: "dim white",
 }
+
+
+def _safe_mode_icon(icon: str, fallback: str) -> str:
+    """Return mode icon when encodable, otherwise an ASCII fallback."""
+    try:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        icon.encode(encoding)
+        return icon
+    except UnicodeEncodeError:
+        return fallback
+
+
+def _scan_mode_label(scan_mode: str) -> str:
+    """Format scan mode text for terminal output."""
+    deep_icon = _safe_mode_icon("🔍", "[D]")
+    turbo_icon = _safe_mode_icon("⚡", "[T]")
+    return f"DEEP {deep_icon}" if scan_mode == SCAN_MODE_DEEP else f"TURBO {turbo_icon}"
+
+
+def _heads_up_mode_line(scan_mode: str) -> str:
+    """Return the mode line shown in the Heads Up panel."""
+    deep_icon = _safe_mode_icon("🔍", "[D]")
+    turbo_icon = _safe_mode_icon("⚡", "[T]")
+    if scan_mode == SCAN_MODE_DEEP:
+        return f"Mode: DEEP {deep_icon} (full analysis, all issues)"
+    return f"Mode: TURBO {turbo_icon} (top 10 critical issues)"
 
 
 def print_banner(name: str, version: str):
@@ -37,12 +86,15 @@ def print_banner(name: str, version: str):
 
 def print_report(report):
     """Print a full scan report as a rich table."""
+    mode = getattr(report, "scan_mode", SCAN_MODE_TURBO)
+
     # Summary panel
     summary = (
         f"[bold]Repo:[/bold] {report.repo_path}\n"
         f"[bold]Files Scanned:[/bold] {report.scanned_files}/{report.total_files}\n"
         f"[bold]Issues Found:[/bold] {len(report.issues)}\n"
         f"[bold]Slop Score:[/bold] {report.slop_score}/100\n"
+        f"[bold]Mode:[/bold] {_scan_mode_label(mode)}\n"
         f"[bold]Model:[/bold] {report.model_used}\n"
         f"[bold]Scan Time:[/bold] {report.scan_time_s:.1f}s"
     )
@@ -139,9 +191,10 @@ def print_warning(message: str):
     console.print(f"[bold yellow]⚠[/bold yellow] {message}")
 
 
-def print_llm_warning(model: str):
+def print_llm_warning(model: str, scan_mode: str = SCAN_MODE_TURBO):
     """Print a yellow warning about LLM analysis being slow."""
     console.print(Panel(
+        f"[bold]{_heads_up_mode_line(scan_mode)}[/bold]\n\n"
         f"[bold]LLM analysis enabled[/bold] — using [cyan]{model}[/cyan]\n\n"
         "This may take [bold]1-3 minutes per file[/bold] depending on your hardware.\n"
         "Progress will update after each file completes.\n\n"

@@ -13,10 +13,16 @@ from macros import (
     REPORT_FORMAT_MARKDOWN, REPORT_FORMAT_HTML, REPORT_FORMAT_JSON,
     REPORT_FORMAT_CSV, REPORT_FORMAT_PDF,
     APP_NAME, APP_VERSION,
+    SCAN_MODE_TURBO, SCAN_MODE_DEEP, DEFAULT_SCAN_MODE,
 )
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _scan_mode_summary(scan_mode: str) -> str:
+    """Format the scan mode label for summaries and exports."""
+    return "DEEP 🔍" if scan_mode == SCAN_MODE_DEEP else "TURBO ⚡"
 
 
 class ReportBuilder:
@@ -40,6 +46,7 @@ class ReportBuilder:
         scanned_files: int,
         scan_time_s: float,
         model_used: str,
+        scan_mode: str = DEFAULT_SCAN_MODE,
     ) -> ScanReport:
         """Build and return a ScanReport from raw scan data."""
         report = ScanReport(
@@ -49,6 +56,7 @@ class ReportBuilder:
             scanned_files=scanned_files,
             issues=issues,
             model_used=model_used,
+            scan_mode=scan_mode,
         )
         report.slop_score = self._compute_slop_score(issues, scanned_files)
         logger.info(
@@ -107,6 +115,7 @@ class ReportBuilder:
             f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             f"Repo: {report.repo_path}",
             f"Slop Score: {report.slop_score}/100",
+            f"Mode: {_scan_mode_summary(report.scan_mode)}",
             f"Model: {report.model_used}",
             f"Files: {report.scanned_files}/{report.total_files}",
             f"Issues: {len(report.issues)}",
@@ -169,6 +178,7 @@ class ReportBuilder:
             f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}  ",
             f"**Repo:** `{report.repo_path}`  ",
             f"**Slop Score:** {report.slop_score}/100  ",
+            f"**Mode:** {_scan_mode_summary(report.scan_mode)}  ",
             f"**Model:** {report.model_used}  ",
             f"**Files Scanned:** {report.scanned_files}/{report.total_files}  ",
             f"**Issues Found:** {len(report.issues)}  ",

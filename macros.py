@@ -25,15 +25,28 @@ REPORTS_DIR = CONFIG_DIR / "reports"
 USER_GUIDE_PATH = ROOT_DIR / "USER_GUIDE.md"
 
 # ─── Defaults ────────────────────────────────────────────────────────────────
-DEFAULT_MODEL = "qwen2.5-coder:7b"
+DEFAULT_MODEL = ""
 DEFAULT_BASE_URL = "http://localhost:11434/v1"
 DEFAULT_API_KEY = "ollama"
 DEFAULT_TEMPERATURE = 0.2
-DEFAULT_MAX_TOKENS = 4096
+DEFAULT_MAX_TOKENS = 1024
 DEFAULT_THEME = "dark"
 DEFAULT_LANGUAGE = "en"
 DEFAULT_MAX_FILE_SIZE_KB = 500
 DEFAULT_SCAN_TIMEOUT_S = 300
+
+# ─── Scan Modes ──────────────────────────────────────────────────────────────
+SCAN_MODE_TURBO = "turbo"
+SCAN_MODE_DEEP = "deep"
+DEFAULT_SCAN_MODE = SCAN_MODE_TURBO
+
+TURBO_MAX_TOKENS = 800
+TURBO_MAX_ISSUES = 10
+TURBO_CHUNK_SIZE = 15000
+
+DEEP_MAX_TOKENS = 4096
+DEEP_MAX_ISSUES = 50
+DEEP_CHUNK_SIZE = 8000
 
 # ─── Severity Levels ─────────────────────────────────────────────────────────
 SEVERITY_CRITICAL = "CRITICAL"

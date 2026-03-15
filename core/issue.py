@@ -3,7 +3,7 @@ Issue dataclass — represents a single detected problem in the codebase.
 All analyzers produce Issue objects. Report builder consumes them.
 """
 from dataclasses import dataclass, field
-from macros import SEVERITY_MEDIUM, CATEGORY_AI_SMELL
+from macros import SEVERITY_MEDIUM, CATEGORY_AI_SMELL, SCAN_MODE_TURBO
 
 
 @dataclass
@@ -36,4 +36,5 @@ class ScanReport:
     issues: list[Issue] = field(default_factory=list)
     slop_score: float = 0.0     # 0-100 overall debt percentage
     model_used: str = ""
+    scan_mode: str = SCAN_MODE_TURBO
     tool_versions: dict = field(default_factory=dict)

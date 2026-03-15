@@ -9,6 +9,7 @@ import sys
 import shutil
 from pathlib import Path
 from utils.logger import get_logger
+from macros import SCAN_MODE_TURBO, SCAN_MODE_DEEP
 
 logger = get_logger(__name__)
 
@@ -152,50 +153,53 @@ def estimate_scan_time(
     model_name: str,
     gpu_vram_gb: float | None,
     avg_file_chars: int = 3000,
+    scan_mode: str = SCAN_MODE_TURBO,
+    use_llm: bool = True,
 ) -> dict:
     """
-    Estimate total scan time based on file count, model size, and hardware.
+    Estimate total scan time based on file count, mode, and hardware.
 
     Returns dict with:
       - hardware: str description of detected hardware
-      - per_file_s: (min, max) seconds per LLM call
+      - per_file_s: (min, max) seconds per file
       - total_s: (min, max) total estimated seconds
       - total_human: human-readable string
       - model_size_b: detected model size
     """
     model_size = _parse_model_size(model_name)
-    size_factor = _model_size_factor(model_size)
 
-    # Base per-LLM-call time in seconds based on hardware
+    # Hardware label for display
     if gpu_vram_gb and gpu_vram_gb >= 8:
-        base_min, base_max = 20, 45
         hardware = f"GPU ({gpu_vram_gb:.0f}GB VRAM)"
     elif gpu_vram_gb and gpu_vram_gb >= 4:
-        base_min, base_max = 60, 120
         hardware = f"GPU ({gpu_vram_gb:.0f}GB VRAM)"
     else:
-        base_min, base_max = 150, 300
         hardware = "CPU-only mode"
 
-    per_call_min = base_min * size_factor
-    per_call_max = base_max * size_factor
+    mode = (scan_mode or SCAN_MODE_TURBO).lower()
+    files = max(1, file_count)
 
-    # Chunking: files > 8000 chars get split into multiple LLM calls
-    CHUNK_SIZE = 8000
-    chunks_per_file = max(1, avg_file_chars // CHUNK_SIZE)
+    # Real-world tuned defaults from recent benchmark runs.
+    if not use_llm:
+        per_file_min, per_file_max = 0.1, 0.9
+    elif mode == SCAN_MODE_DEEP:
+        per_file_min, per_file_max = 15.0, 30.0
+    else:
+        per_file_min, per_file_max = 20.0, 40.0
 
-    # Retries: ~50% of chunks may need one retry
-    retry_factor = 1.5
+    total_min = per_file_min * files
+    total_max = per_file_max * files
 
-    total_calls = file_count * chunks_per_file * retry_factor
-    total_min = per_call_min * total_calls
-    total_max = per_call_max * total_calls
+    if not use_llm:
+        total_human = "< 1s per file"
+    else:
+        total_human = _format_time_range(total_min, total_max)
 
     return {
         "hardware": hardware,
-        "per_file_s": (per_call_min, per_call_max),
+        "per_file_s": (per_file_min, per_file_max),
         "total_s": (total_min, total_max),
-        "total_human": _format_time_range(total_min, total_max),
+        "total_human": total_human,
         "model_size_b": model_size,
     }
 

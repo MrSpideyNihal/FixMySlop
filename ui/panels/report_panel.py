@@ -12,7 +12,7 @@ from ui.widgets.file_tree import FileTreeWidget
 from ui.widgets.issue_card import IssueCard
 from ui.widgets.severity_badge import SeverityBadge
 from utils.config import Config
-from macros import SEVERITY_ORDER
+from macros import SEVERITY_ORDER, SCAN_MODE_DEEP
 
 
 class ReportPanel(QWidget):
@@ -90,7 +90,9 @@ class ReportPanel(QWidget):
         """Load a scan report and display its contents."""
         self._report = report
         self._file_tree.load_issues(report.issues)
+        mode_label = "DEEP 🔍" if report.scan_mode == SCAN_MODE_DEEP else "TURBO ⚡"
         self._stats_label.setText(
+            f"Mode: {mode_label}  •  "
             f"{len(report.issues)} issues  •  "
             f"Slop Score: {report.slop_score}/100  •  "
             f"{report.scanned_files} files  •  "

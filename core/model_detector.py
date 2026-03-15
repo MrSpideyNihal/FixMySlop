@@ -53,3 +53,20 @@ class ModelDetector:
         """Get all models from a specific backend URL."""
         models = self._probe_backend(base_url)
         return models or []
+
+
+def get_best_available_model(base_url: str = None) -> str:
+    """Query backend and return best available model.
+    Prefers coder models. Returns empty string if nothing found."""
+    from macros import KNOWN_BACKENDS
+    urls_to_try = [base_url] if base_url else list(KNOWN_BACKENDS.values())
+    detector = ModelDetector()
+    for url in urls_to_try:
+        models = detector._probe_backend(url)
+        if not models:
+            continue
+        coder = [m for m in models if "coder" in m.lower()]
+        if coder:
+            return coder[0]
+        return models[0]
+    return ""

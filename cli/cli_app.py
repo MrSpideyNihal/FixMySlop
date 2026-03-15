@@ -5,7 +5,10 @@ Run: python -m cli.cli_app scan ./myrepo --model qwen2.5-coder:7b
 import typer
 from pathlib import Path
 from typing import Optional
-from macros import APP_NAME, APP_VERSION, DEFAULT_MODEL, DEFAULT_BASE_URL, DEFAULT_API_KEY
+from macros import (
+    APP_NAME, APP_VERSION, DEFAULT_MODEL, DEFAULT_BASE_URL, DEFAULT_API_KEY,
+    SCAN_MODE_TURBO, SCAN_MODE_DEEP, DEFAULT_SCAN_MODE,
+)
 from cli.cli_output import (
     print_banner, print_report, print_error, print_success,
     print_llm_warning, print_analyzing, print_scan_estimate,
@@ -29,6 +32,11 @@ def scan(
     save: Optional[str] = typer.Option(None, "--save", "-s", help="Save report to file"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Static analysis only, skip LLM"),
     retries: int = typer.Option(2, "--retries", help="Max LLM retries per file on parse failure"),
+    mode: str = typer.Option(
+        DEFAULT_SCAN_MODE,
+        "--mode",
+        help="Scan mode: turbo (fast, top issues) or deep (thorough)",
+    ),
 ):
     """Scan a codebase for AI debt, bugs, and security issues."""
     from core.scanner import Scanner
@@ -46,17 +54,54 @@ def scan(
         print_error(f"Path not found: {repo_path}")
         raise typer.Exit(1)
 
+    scan_mode = mode.strip().lower()
+    if scan_mode not in {SCAN_MODE_TURBO, SCAN_MODE_DEEP}:
+        print_error("Invalid --mode. Use 'turbo' or 'deep'.")
+        raise typer.Exit(1)
+
     client = None
     use_llm = not no_llm
-    if use_llm:
-        client = LLMClient(base_url=base_url, api_key=api_key, model=model)
+    if not no_llm:
+        client = LLMClient(
+            base_url=base_url,
+            api_key=api_key,
+            model=model
+        )
         if not client.is_available():
-            print_error(f"Cannot reach LLM backend at {base_url}. Is it running?")
-            raise typer.Exit(1)
-        print_llm_warning(model)
+            from core.model_detector import get_best_available_model
+            best = get_best_available_model(base_url)
+            if best:
+                typer.echo(
+                    f"[INFO] Model '{model}' not found "
+                    f"— auto-switching to '{best}'"
+                )
+                client = LLMClient(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=best
+                )
+            else:
+                print_error(
+                    f"No LLM backend running at {base_url}.\n"
+                    "Start Ollama first or use --no-llm flag."
+                )
+                raise typer.Exit(1)
+        elif client.model != model:
+            typer.echo(
+                f"[INFO] Auto-switched model to '{client.model}'"
+            )
+
+    active_model = client.model if use_llm and client else model
+    if use_llm:
+        print_llm_warning(active_model, scan_mode)
 
     scanner = Scanner(str(repo_path))
-    analyzer = Analyzer(llm_client=client, use_static_tools=True, max_retries=retries)
+    analyzer = Analyzer(
+        llm_client=client,
+        use_static_tools=True,
+        max_retries=retries,
+        scan_mode=scan_mode,
+    )
     builder = ReportBuilder()
     all_issues: list[Issue] = []
 
@@ -73,8 +118,15 @@ def scan(
                 avg_chars = sum(file_sizes) // len(file_sizes)
         except Exception:
             pass
-        estimate = estimate_scan_time(total, model, gpu_info["vram_gb"], avg_chars)
-        print_scan_estimate(estimate, total, model)
+        estimate = estimate_scan_time(
+            total,
+            active_model,
+            gpu_info["vram_gb"],
+            avg_chars,
+            scan_mode=scan_mode,
+            use_llm=use_llm,
+        )
+        print_scan_estimate(estimate, total, active_model)
 
     start = time.time()
 
@@ -82,7 +134,7 @@ def scan(
         for file_path, content in scanner.scan():
             if use_llm:
                 elapsed = time.time() - start
-                print_analyzing(file_path.name, model, progress.pos + 1, total, elapsed)
+                print_analyzing(file_path.name, active_model, progress.pos + 1, total, elapsed)
             issues = analyzer.analyze_file(file_path, content)
             all_issues.extend(issues)
             progress.update(1)
@@ -93,7 +145,8 @@ def scan(
         total_files=total,
         scanned_files=total,
         scan_time_s=time.time() - start,
-        model_used=model if use_llm else "static-only",
+        model_used=client.model if use_llm and client else "static-only",
+        scan_mode=scan_mode,
     )
     print_report(report)
 

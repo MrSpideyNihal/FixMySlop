@@ -9,9 +9,23 @@ from typing import Optional
 from core.issue import Issue
 from core.llm_client import LLMClient
 from core.static_tools import StaticToolRunner
-from core.prompts import SYSTEM_AUDIT, AUDIT_USER_TEMPLATE
+from core.prompts import SYSTEM_AUDIT_TURBO, SYSTEM_AUDIT_DEEP, AUDIT_USER_TEMPLATE
 from utils.logger import get_logger
-from macros import SEVERITY_HIGH
+from macros import (
+    SEVERITY_CRITICAL,
+    SEVERITY_HIGH,
+    SEVERITY_MEDIUM,
+    SEVERITY_LOW,
+    SEVERITY_INFO,
+    SCAN_MODE_TURBO,
+    SCAN_MODE_DEEP,
+    TURBO_MAX_TOKENS,
+    TURBO_MAX_ISSUES,
+    TURBO_CHUNK_SIZE,
+    DEEP_MAX_TOKENS,
+    DEEP_MAX_ISSUES,
+    DEEP_CHUNK_SIZE,
+)
 
 logger = get_logger(__name__)
 
@@ -134,11 +148,33 @@ class Analyzer:
     """
 
     def __init__(self, llm_client: Optional[LLMClient] = None,
-                 use_static_tools: bool = True, max_retries: int = 2):
+                 use_static_tools: bool = True,
+                 max_retries: int = 2,
+                 scan_mode: str = SCAN_MODE_TURBO):
         """Initialize analyzer with optional LLM client, static tool toggle, and retry count."""
         self.llm = llm_client
         self.static = StaticToolRunner() if use_static_tools else None
         self.max_retries = max_retries
+        self.scan_mode = scan_mode if scan_mode in {SCAN_MODE_TURBO, SCAN_MODE_DEEP} else SCAN_MODE_TURBO
+
+        if self.scan_mode == SCAN_MODE_TURBO:
+            self.max_tokens = TURBO_MAX_TOKENS
+            self.max_issues = TURBO_MAX_ISSUES
+            self.chunk_size = TURBO_CHUNK_SIZE
+            self.system_prompt = SYSTEM_AUDIT_TURBO
+        else:
+            self.max_tokens = DEEP_MAX_TOKENS
+            self.max_issues = DEEP_MAX_ISSUES
+            self.chunk_size = DEEP_CHUNK_SIZE
+            self.system_prompt = SYSTEM_AUDIT_DEEP
+
+        self._severity_rank = {
+            SEVERITY_CRITICAL: 0,
+            SEVERITY_HIGH: 1,
+            SEVERITY_MEDIUM: 2,
+            SEVERITY_LOW: 3,
+            SEVERITY_INFO: 4,
+        }
 
     def analyze_file(self, file_path: Path, content: str) -> list[Issue]:
         """
@@ -172,44 +208,67 @@ class Analyzer:
             except Exception as e:
                 logger.warning("LLM analysis failed for %s: %s", file_path.name, e)
 
-        return self._deduplicate(issues)
+        deduped = self._deduplicate(issues)
+        if self.scan_mode == SCAN_MODE_TURBO:
+            deduped.sort(
+                key=lambda issue: (
+                    self._severity_rank.get(issue.severity, 99),
+                    issue.line_start,
+                    issue.rule_id,
+                )
+            )
+            return deduped[:self.max_issues]
+        return deduped
 
     def _llm_analyze(self, file_path: Path, content: str, language: str) -> list[Issue]:
         """Send file to LLM for analysis, chunking only very large files."""
-        CHUNK_SIZE = 8000
-        OVERLAP = 500
+        OVERLAP = 200
 
-        if len(content) <= CHUNK_SIZE:
+        if len(content) <= self.chunk_size + OVERLAP:
             return self._llm_analyze_chunk(file_path, content, language)
 
         # Split into overlapping chunks for large files
         logger.info(
             "File %s is %d chars — splitting into chunks of %d",
-            file_path.name, len(content), CHUNK_SIZE,
+            file_path.name, len(content), self.chunk_size,
         )
         all_issues: list[Issue] = []
         offset = 0
         chunk_num = 0
         while offset < len(content):
-            chunk = content[offset:offset + CHUNK_SIZE]
+            chunk = content[offset:offset + self.chunk_size]
             chunk_num += 1
             logger.debug("Analyzing chunk %d (offset %d) of %s", chunk_num, offset, file_path.name)
             issues = self._llm_analyze_chunk(file_path, chunk, language)
             all_issues.extend(issues)
-            offset += CHUNK_SIZE - OVERLAP
+            offset += self.chunk_size - OVERLAP
 
-        return self._deduplicate(all_issues)
+        return self._deduplicate(all_issues)[:self.max_issues]
 
     def _llm_analyze_chunk(self, file_path: Path, code: str, language: str) -> list[Issue]:
         """Analyze a single chunk of code with retry on parse failure."""
         for attempt in range(1, self.max_retries + 1):
             try:
                 if attempt == 1:
-                    prompt = AUDIT_USER_TEMPLATE.format(
-                        language=language,
-                        file_path=str(file_path),
-                        code=code,
-                    )
+                    if self.scan_mode == SCAN_MODE_TURBO:
+                        prompt = (
+                            f"Fast audit for this {language} code.\n"
+                            f"File: {file_path}\n\n"
+                            f"```{language}\n{code}\n```\n\n"
+                            "Return ONLY a compact JSON array using schema fields: "
+                            "line_start, line_end, severity, category, rule_id, "
+                            "title, description, evidence.\n"
+                            f"Maximum {self.max_issues} objects.\n"
+                            "Prioritize CRITICAL and HIGH issues only.\n"
+                            "Keep description under 12 words and evidence under 80 chars.\n"
+                            "No markdown. No extra text."
+                        )
+                    else:
+                        prompt = AUDIT_USER_TEMPLATE.format(
+                            language=language,
+                            file_path=str(file_path),
+                            code=code,
+                        )
                 else:
                     prompt = (
                         f"Analyze this {language} code for bugs and security issues.\n"
@@ -226,7 +285,17 @@ class Analyzer:
                         attempt, self.max_retries, file_path.name,
                     )
 
-                raw = self.llm.chat(SYSTEM_AUDIT, prompt)
+                effective_max_tokens = self.max_tokens
+                if self.scan_mode == SCAN_MODE_DEEP:
+                    # Keep deep mode thorough while preventing multi-minute generation spikes.
+                    effective_max_tokens = min(self.max_tokens, 1000)
+
+                raw = self.llm.chat(
+                    self.system_prompt,
+                    prompt,
+                    temperature=0.0 if self.scan_mode == SCAN_MODE_TURBO else 0.2,
+                    max_tokens=effective_max_tokens,
+                )
                 data = _repair_and_parse(raw)
 
                 if not data:
@@ -236,7 +305,8 @@ class Analyzer:
                     )
 
                 if data:
-                    return self._build_issues(data, file_path)
+                    issues = self._build_issues(data, file_path)
+                    return issues[:self.max_issues]
 
                 if attempt < self.max_retries:
                     logger.info("LLM returned 0 issues on attempt %d, retrying...", attempt)

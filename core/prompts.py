@@ -13,9 +13,31 @@ SYSTEM_AUDIT = (
     "- Missing error handling, tests, or documentation\n"
     "- Poor maintainability (magic numbers, long functions, unclear naming)\n"
     "\n"
+    "Return a maximum of 15 most critical issues only. "
+    "Prioritize CRITICAL and HIGH severity. Be concise.\n"
+    "\n"
     "Respond with ONLY a valid JSON array. No markdown, no explanation, no code fences.\n"
     "Start with [ and end with ]. Nothing else."
 )
+
+SYSTEM_AUDIT_TURBO = """You are FixMySlop, a fast code auditor.
+Find the TOP 10 most critical issues only.
+Focus on: hardcoded secrets, SQL injection, unsafe eval/exec,
+shell injection, pickle deserialization, missing auth.
+Return ONLY a valid JSON array. No markdown. No explanation.
+Maximum 10 objects. Be extremely concise in descriptions."""
+
+SYSTEM_AUDIT_DEEP = """You are FixMySlop, an expert code auditor
+specializing in AI-generated code. Analyze thoroughly for:
+- Security vulnerabilities (OWASP Top 10, injection, auth issues,
+  exposed secrets, unsafe deserialization)
+- Technical debt (duplicated logic, dead code, over-engineering)
+- AI-specific smells (hallucinated imports, bare except, no validation)
+- Performance issues (N+1, blocking I/O, O(n²) loops)
+- Missing error handling, tests, documentation
+- Race conditions and threading issues
+Return ONLY valid JSON array. No markdown. No explanation outside JSON.
+Return ALL issues found with no limit."""
 
 AUDIT_USER_TEMPLATE = (
     "Analyze this {language} code and return a JSON array of issues found.\n"
