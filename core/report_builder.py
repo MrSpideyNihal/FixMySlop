@@ -25,6 +25,28 @@ def _scan_mode_summary(scan_mode: str) -> str:
     return "DEEP 🔍" if scan_mode == SCAN_MODE_DEEP else "TURBO ⚡"
 
 
+def _strip_emojis_for_pdf(text: str) -> str:
+    """Replace emojis with PDF-safe plain text."""
+    replacements = {
+        "⚡": "[TURBO]",
+        "🔍": "[DEEP]",
+        "⚠": "[!]",
+        "✓": "[OK]",
+        "⏳": "[...]",
+        "🔒": "[SEC]",
+        "📊": "[STATS]",
+    }
+    for emoji, replacement in replacements.items():
+        text = text.replace(emoji, replacement)
+    # Helvetica in fpdf2 expects latin-1 text unless custom Unicode fonts are used.
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def _pdf_safe_text(value) -> str:
+    """Coerce values to string and remove unsupported emoji glyphs for PDF fonts."""
+    return _strip_emojis_for_pdf(str(value))
+
+
 class ReportBuilder:
     """
     Assembles a ScanReport from issues and exports to
@@ -106,7 +128,13 @@ class ReportBuilder:
 
         # Title
         pdf.set_font("Helvetica", "B", 20)
-        pdf.cell(0, 12, f"{APP_NAME} Audit Report", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(
+            0,
+            12,
+            _pdf_safe_text(f"{APP_NAME} Audit Report"),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
         pdf.ln(4)
 
         # Metadata
@@ -122,7 +150,7 @@ class ReportBuilder:
             f"Scan Time: {report.scan_time_s:.1f}s",
         ]
         for line in meta:
-            pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 6, _pdf_safe_text(line), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(6)
 
         # Issues table header
@@ -130,17 +158,22 @@ class ReportBuilder:
         col_w = [22, 55, 22, 30, 60]
         headers = ["Severity", "File", "Lines", "Category", "Title"]
         for w, h in zip(col_w, headers):
-            pdf.cell(w, 8, h, border=1)
+            pdf.cell(w, 8, _pdf_safe_text(h), border=1)
         pdf.ln()
 
         # Issues table rows
         pdf.set_font("Helvetica", "", 8)
         for issue in sorted(report.issues, key=lambda i: i.severity):
-            pdf.cell(col_w[0], 7, issue.severity, border=1)
-            pdf.cell(col_w[1], 7, str(issue.file_path)[-30:], border=1)
-            pdf.cell(col_w[2], 7, f"{issue.line_start}-{issue.line_end}", border=1)
-            pdf.cell(col_w[3], 7, issue.category[:16], border=1)
-            pdf.cell(col_w[4], 7, issue.title[:32], border=1)
+            pdf.cell(col_w[0], 7, _pdf_safe_text(issue.severity), border=1)
+            pdf.cell(col_w[1], 7, _pdf_safe_text(str(issue.file_path)[-30:]), border=1)
+            pdf.cell(
+                col_w[2],
+                7,
+                _pdf_safe_text(f"{issue.line_start}-{issue.line_end}"),
+                border=1,
+            )
+            pdf.cell(col_w[3], 7, _pdf_safe_text(issue.category[:16]), border=1)
+            pdf.cell(col_w[4], 7, _pdf_safe_text(issue.title[:32]), border=1)
             pdf.ln()
 
         pdf.output(output_path)

@@ -1,10 +1,13 @@
 """Tests for core/report_builder.py."""
-from core.report_builder import ReportBuilder
+import sys
+import types
+from pathlib import Path
+from core.report_builder import ReportBuilder, _strip_emojis_for_pdf
 from core.issue import Issue
 from macros import (
     SEVERITY_CRITICAL, SEVERITY_HIGH, SEVERITY_MEDIUM,
     REPORT_FORMAT_MARKDOWN, REPORT_FORMAT_JSON, REPORT_FORMAT_HTML,
-    APP_NAME,
+    APP_NAME, SCAN_MODE_TURBO,
 )
 
 
@@ -62,3 +65,68 @@ class TestReportBuilder:
         html = builder.export(sample_report, REPORT_FORMAT_HTML)
         assert "<html" in html
         assert APP_NAME in html
+
+    def test_strip_emojis_for_pdf(self):
+        """Emoji-rich strings should be converted to PDF-safe labels."""
+        text = "⚡ 🔍 ⚠ ✓ ⏳ 🔒 📊"
+        cleaned = _strip_emojis_for_pdf(text)
+        assert "⚡" not in cleaned
+        assert "🔍" not in cleaned
+        assert "⚠" not in cleaned
+        assert "✓" not in cleaned
+        assert "⏳" not in cleaned
+        assert "🔒" not in cleaned
+        assert "📊" not in cleaned
+        assert "[TURBO]" in cleaned
+        assert "[DEEP]" in cleaned
+        assert "[!]" in cleaned
+        assert "[OK]" in cleaned
+        assert "[...]" in cleaned
+        assert "[SEC]" in cleaned
+        assert "[STATS]" in cleaned
+
+    def test_export_pdf_strips_emoji_before_canvas_write(self, monkeypatch, sample_report, tmp_path):
+        """PDF export should sanitize unsupported emoji characters before writing cells."""
+        captured_text = []
+
+        class FakeFPDF:
+            def set_auto_page_break(self, auto=True, margin=15):
+                return None
+
+            def add_page(self):
+                return None
+
+            def set_font(self, family, style="", size=12):
+                return None
+
+            def cell(self, *args, **kwargs):
+                text = kwargs.get("txt")
+                if text is None and len(args) >= 3:
+                    text = args[2]
+                captured_text.append(str(text) if text is not None else "")
+
+            def ln(self, h=None):
+                return None
+
+            def output(self, output_path):
+                Path(output_path).write_text("fake-pdf", encoding="utf-8")
+
+        fake_fpdf_module = types.SimpleNamespace(FPDF=FakeFPDF)
+        monkeypatch.setitem(sys.modules, "fpdf", fake_fpdf_module)
+
+        sample_report.scan_mode = SCAN_MODE_TURBO
+        sample_report.model_used = "qwen2.5-coder:3b ⚡"
+        sample_report.issues[0].title = "Unsafe path ⚠"
+        sample_report.issues[0].category = "Security 🔒"
+
+        output_path = tmp_path / "report.pdf"
+        builder = ReportBuilder()
+        builder.export_pdf(sample_report, str(output_path))
+
+        assert output_path.exists()
+        all_written = "\n".join(captured_text)
+        for emoji in ("⚡", "🔍", "⚠", "✓", "⏳", "🔒", "📊"):
+            assert emoji not in all_written
+        assert "[TURBO]" in all_written
+        assert "[!]" in all_written
+        assert "[SEC]" in all_written
