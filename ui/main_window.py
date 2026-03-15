@@ -140,6 +140,7 @@ class MainWindow(QMainWindow):
 
         # Settings → theme change
         self.settings_panel.theme_changed.connect(self._on_theme_changed)
+        self.settings_panel.font_size_changed.connect(self._on_font_size_changed)
 
     def _on_scan_complete(self, report):
         """Handle scan completion — load results and switch panels."""
@@ -156,9 +157,16 @@ class MainWindow(QMainWindow):
 
     def _on_theme_changed(self, theme: str):
         """Apply a new theme to the application."""
-        app = self.window()
         from PyQt5.QtWidgets import QApplication
         qapp = QApplication.instance()
         if qapp:
-            apply_theme(qapp, theme)
+            apply_theme(qapp, theme, self.config.font_size)
         self.toast.info(f"Theme changed to {theme}")
+
+    def _on_font_size_changed(self, font_size: int):
+        """Apply updated font size immediately across the application."""
+        from PyQt5.QtWidgets import QApplication
+        qapp = QApplication.instance()
+        if qapp:
+            apply_theme(qapp, self.config.theme, font_size)
+        self.toast.info(f"Font size set to {font_size}px")

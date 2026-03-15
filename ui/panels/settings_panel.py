@@ -5,7 +5,7 @@ All changes auto-save to ~/.fixmyslop/config.yaml.
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QCheckBox, QGroupBox, QFormLayout,
-    QScrollArea, QFrame, QDoubleSpinBox,
+    QScrollArea, QFrame, QDoubleSpinBox, QSpinBox,
 )
 from PyQt5.QtCore import pyqtSignal
 from utils.config import Config
@@ -13,6 +13,7 @@ from ui.theme import get_available_themes
 from macros import (
     KNOWN_BACKENDS, DEFAULT_MODEL, DEFAULT_BASE_URL,
     DEFAULT_API_KEY, DEFAULT_TEMPERATURE,
+    DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE,
 )
 from utils.logger import get_logger
 
@@ -23,6 +24,7 @@ class SettingsPanel(QWidget):
     """Settings panel for model, backend, theme, and preferences."""
 
     theme_changed = pyqtSignal(str)
+    font_size_changed = pyqtSignal(int)
 
     def __init__(self, config: Config, parent=None):
         """Initialize settings panel with config."""
@@ -117,6 +119,14 @@ class SettingsPanel(QWidget):
             self._theme_combo.setCurrentIndex(idx)
         appearance_layout.addRow("Theme:", self._theme_combo)
 
+        self._font_size_spin = QSpinBox()
+        self._font_size_spin.setRange(MIN_FONT_SIZE, MAX_FONT_SIZE)
+        self._font_size_spin.setSuffix(" px")
+        self._font_size_spin.setValue(
+            int(self.config.get("font_size", DEFAULT_FONT_SIZE))
+        )
+        appearance_layout.addRow("Font Size:", self._font_size_spin)
+
         layout.addWidget(appearance_group)
 
         # ─── File Handling ───────────────────────────────────────────────
@@ -163,9 +173,16 @@ class SettingsPanel(QWidget):
         self.config.set("use_semgrep", self._semgrep_cb.isChecked())
         self.config.set("auto_backup", self._backup_cb.isChecked())
 
+        new_font_size = int(self._font_size_spin.value())
+        old_font_size = int(self.config.get("font_size", DEFAULT_FONT_SIZE))
+        self.config.set("font_size", new_font_size)
+
         new_theme = self._theme_combo.currentText()
         if new_theme != self.config.theme:
             self.config.set("theme", new_theme)
             self.theme_changed.emit(new_theme)
+
+        if new_font_size != old_font_size:
+            self.font_size_changed.emit(new_font_size)
 
         logger.info("Settings saved")

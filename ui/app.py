@@ -22,7 +22,7 @@ def launch():
     app.setApplicationVersion(APP_VERSION)
 
     config = Config()
-    apply_theme(app, config.theme)
+    apply_theme(app, config.theme, config.font_size)
 
     window = MainWindow(config)
     window.show()

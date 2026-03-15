@@ -6,7 +6,8 @@ import yaml
 from pathlib import Path
 from macros import (
     CONFIG_FILE, CONFIG_DIR, DEFAULT_MODEL, DEFAULT_BASE_URL,
-    DEFAULT_API_KEY, DEFAULT_TEMPERATURE, DEFAULT_THEME, DEFAULT_LANGUAGE,
+    DEFAULT_API_KEY, DEFAULT_TEMPERATURE, DEFAULT_THEME, DEFAULT_FONT_SIZE,
+    DEFAULT_LANGUAGE,
 )
 from utils.logger import get_logger
 
@@ -18,6 +19,7 @@ DEFAULTS = {
     "api_key": DEFAULT_API_KEY,
     "temperature": DEFAULT_TEMPERATURE,
     "theme": DEFAULT_THEME,
+    "font_size": DEFAULT_FONT_SIZE,
     "language": DEFAULT_LANGUAGE,
     "use_ruff": True,
     "use_bandit": True,
@@ -88,3 +90,8 @@ class Config:
     def temperature(self) -> float:
         """Return the configured LLM temperature."""
         return self.get("temperature")
+
+    @property
+    def font_size(self) -> int:
+        """Return the configured UI base font size in px."""
+        return int(self.get("font_size", DEFAULTS["font_size"]))

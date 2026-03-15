@@ -5,7 +5,7 @@ Takes a file path + content, returns a list of Issue objects.
 import json
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from core.issue import Issue
 from core.llm_client import LLMClient
 from core.static_tools import StaticToolRunner
@@ -49,7 +49,14 @@ def _repair_and_parse(raw: str) -> list:
     # 1. Try direct parse (clean JSON)
     try:
         result = json.loads(text)
-        return result if isinstance(result, list) else []
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            for key in ("issues", "findings", "results", "data"):
+                value = result.get(key)
+                if isinstance(value, list):
+                    return value
+        return []
     except json.JSONDecodeError:
         pass
 
@@ -60,6 +67,11 @@ def _repair_and_parse(raw: str) -> list:
     start = text.find("[")
     end = text.rfind("]")
     if start == -1 or end == -1 or end <= start:
+        # Fall back to salvaging standalone JSON objects if the model omitted array wrappers.
+        objects = _extract_objects(text)
+        if objects:
+            logger.info("Salvaged %d valid objects from non-array JSON", len(objects))
+            return objects
         return []
     text = text[start:end + 1]
 
@@ -150,12 +162,14 @@ class Analyzer:
     def __init__(self, llm_client: Optional[LLMClient] = None,
                  use_static_tools: bool = True,
                  max_retries: int = 2,
-                 scan_mode: str = SCAN_MODE_TURBO):
+                 scan_mode: str = SCAN_MODE_TURBO,
+                 progress_callback: Optional[Callable[[str], None]] = None):
         """Initialize analyzer with optional LLM client, static tool toggle, and retry count."""
         self.llm = llm_client
         self.static = StaticToolRunner() if use_static_tools else None
         self.max_retries = max_retries
         self.scan_mode = scan_mode if scan_mode in {SCAN_MODE_TURBO, SCAN_MODE_DEEP} else SCAN_MODE_TURBO
+        self._progress_callback = progress_callback
 
         if self.scan_mode == SCAN_MODE_TURBO:
             self.max_tokens = TURBO_MAX_TOKENS
@@ -176,6 +190,15 @@ class Analyzer:
             SEVERITY_INFO: 4,
         }
 
+    def _emit_progress(self, message: str):
+        """Emit analyzer progress to UI/CLI if a callback is configured."""
+        if not self._progress_callback:
+            return
+        try:
+            self._progress_callback(message)
+        except Exception:
+            pass
+
     def analyze_file(self, file_path: Path, content: str) -> list[Issue]:
         """
         Run all analysis passes on a single file.
@@ -183,30 +206,42 @@ class Analyzer:
         """
         issues: list[Issue] = []
         language = self._detect_language(file_path)
+        self._emit_progress(f"[{file_path.name}] Starting analysis...")
 
         # Pass 1: Static tools (fast, deterministic)
         if self.static:
             try:
+                self._emit_progress(f"[{file_path.name}] Running static checks...")
                 static_issues = self.static.run(file_path, content, language)
                 issues.extend(static_issues)
                 logger.debug(
                     "Static tools found %d issues in %s",
                     len(static_issues), file_path.name,
                 )
+                self._emit_progress(
+                    f"[{file_path.name}] Static checks complete ({len(static_issues)} issues)."
+                )
             except Exception as e:
                 logger.warning("Static tools failed for %s: %s", file_path.name, e)
+                self._emit_progress(f"[{file_path.name}] Static checks failed. Continuing...")
 
         # Pass 2: LLM deep analysis
         if self.llm:
             try:
+                mode_name = "Turbo" if self.scan_mode == SCAN_MODE_TURBO else "Deep"
+                self._emit_progress(f"[{file_path.name}] Running {mode_name} LLM analysis...")
                 llm_issues = self._llm_analyze(file_path, content, language)
                 issues.extend(llm_issues)
                 logger.debug(
                     "LLM found %d issues in %s",
                     len(llm_issues), file_path.name,
                 )
+                self._emit_progress(
+                    f"[{file_path.name}] LLM analysis complete ({len(llm_issues)} issues)."
+                )
             except Exception as e:
                 logger.warning("LLM analysis failed for %s: %s", file_path.name, e)
+                self._emit_progress(f"[{file_path.name}] LLM analysis failed. Continuing...")
 
         deduped = self._deduplicate(issues)
         if self.scan_mode == SCAN_MODE_TURBO:
@@ -217,7 +252,11 @@ class Analyzer:
                     issue.rule_id,
                 )
             )
-            return deduped[:self.max_issues]
+            final = deduped[:self.max_issues]
+            self._emit_progress(f"[{file_path.name}] Done ({len(final)} total issues).")
+            return final
+
+        self._emit_progress(f"[{file_path.name}] Done ({len(deduped)} total issues).")
         return deduped
 
     def _llm_analyze(self, file_path: Path, content: str, language: str) -> list[Issue]:
@@ -228,6 +267,11 @@ class Analyzer:
             return self._llm_analyze_chunk(file_path, content, language)
 
         # Split into overlapping chunks for large files
+        step = self.chunk_size - OVERLAP
+        total_chunks = max(1, ((len(content) - 1) // step) + 1)
+        self._emit_progress(
+            f"[{file_path.name}] Large file detected — analyzing {total_chunks} chunks..."
+        )
         logger.info(
             "File %s is %d chars — splitting into chunks of %d",
             file_path.name, len(content), self.chunk_size,
@@ -238,10 +282,13 @@ class Analyzer:
         while offset < len(content):
             chunk = content[offset:offset + self.chunk_size]
             chunk_num += 1
+            self._emit_progress(
+                f"[{file_path.name}] LLM chunk {chunk_num}/{total_chunks}..."
+            )
             logger.debug("Analyzing chunk %d (offset %d) of %s", chunk_num, offset, file_path.name)
             issues = self._llm_analyze_chunk(file_path, chunk, language)
             all_issues.extend(issues)
-            offset += self.chunk_size - OVERLAP
+            offset += step
 
         return self._deduplicate(all_issues)[:self.max_issues]
 
@@ -249,6 +296,9 @@ class Analyzer:
         """Analyze a single chunk of code with retry on parse failure."""
         for attempt in range(1, self.max_retries + 1):
             try:
+                self._emit_progress(
+                    f"[{file_path.name}] LLM pass {attempt}/{self.max_retries}..."
+                )
                 if attempt == 1:
                     if self.scan_mode == SCAN_MODE_TURBO:
                         prompt = (
@@ -310,6 +360,7 @@ class Analyzer:
 
                 if attempt < self.max_retries:
                     logger.info("LLM returned 0 issues on attempt %d, retrying...", attempt)
+                    self._emit_progress(f"[{file_path.name}] LLM response unclear, retrying...")
                     continue
                 return []
 
@@ -319,6 +370,7 @@ class Analyzer:
                         "LLM analysis attempt %d failed for %s: %s — retrying",
                         attempt, file_path.name, e,
                     )
+                    self._emit_progress(f"[{file_path.name}] LLM attempt failed, retrying...")
                     continue
                 logger.warning("LLM analysis failed after %d attempts for %s: %s",
                                self.max_retries, file_path.name, e)

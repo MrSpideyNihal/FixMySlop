@@ -27,6 +27,7 @@ class ScanWorker(QObject):
     """Runs the full scan pipeline in a background thread."""
 
     progress = pyqtSignal(int, int, str)     # current, total, filename
+    status = pyqtSignal(str)                  # status text updates
     complete = pyqtSignal(object)             # ScanReport
     failed = pyqtSignal(str)                  # error message
 
@@ -43,6 +44,7 @@ class ScanWorker(QObject):
         try:
             client = None
             if self.config.get("use_llm", True):
+                self.status.emit("Connecting to LLM backend...")
                 client = LLMClient(
                     base_url=self.config.base_url,
                     api_key=self.config.api_key,
@@ -54,12 +56,16 @@ class ScanWorker(QObject):
                         "Is Ollama running?"
                     )
                     return
+            else:
+                self.status.emit("Running static-only scan...")
 
+            self.status.emit("Preparing scanner...")
             scanner = Scanner(self.repo_path)
             analyzer = Analyzer(
                 llm_client=client,
                 use_static_tools=self.config.get("use_ruff", True),
                 scan_mode=self.scan_mode,
+                progress_callback=lambda message: self.status.emit(message),
             )
             builder = ReportBuilder()
             all_issues: list[Issue] = []
@@ -71,6 +77,7 @@ class ScanWorker(QObject):
                 issues = analyzer.analyze_file(file_path, content)
                 all_issues.extend(issues)
 
+            self.status.emit("Building final report...")
             report = builder.build(
                 repo_path=self.repo_path,
                 issues=all_issues,
@@ -186,14 +193,14 @@ class ScanPanel(QWidget):
             'Turbo: "Fast scan · Top 10 critical issues · ~30s"\n'
             'Deep:  "Full analysis · All issues · 2-5 mins"'
         )
-        self.mode_desc_label.setStyleSheet("color: #8892a4; font-size: 12px;")
+        self.mode_desc_label.setStyleSheet("color: #8892a4;")
         layout.addWidget(self.mode_desc_label)
 
         # Scan estimate label (shown under model selector)
         self.estimate_label = QLabel("")
         self.estimate_label.setStyleSheet(
             "background: #141820; border: 1px solid #1e2433; border-radius: 8px; "
-            "padding: 12px 16px; color: #8892a4; font-size: 12px;"
+            "padding: 12px 16px; color: #8892a4;"
         )
         self.estimate_label.setWordWrap(True)
         self.estimate_label.setVisible(False)
@@ -359,6 +366,7 @@ class ScanPanel(QWidget):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._on_progress)
+        self._worker.status.connect(self._on_status)
         self._worker.complete.connect(self._on_complete)
         self._worker.failed.connect(self._on_failed)
         self._thread.start()
@@ -368,6 +376,11 @@ class ScanPanel(QWidget):
         self.progress_bar.setMaximum(total)
         self.progress_bar.setValue(current)
         self.status_label.setText(f"Scanning: {filename} ({current}/{total})")
+
+    def _on_status(self, message: str):
+        """Show detailed scan stage updates from the background worker."""
+        if message:
+            self.status_label.setText(message)
 
     def _on_complete(self, report: ScanReport):
         """Handle scan completion."""
