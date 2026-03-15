@@ -189,8 +189,6 @@ class ScanPanel(QWidget):
         self.mode_desc_label.setStyleSheet("color: #8892a4; font-size: 12px;")
         layout.addWidget(self.mode_desc_label)
 
-        self._set_scan_mode(self._scan_mode)
-
         # Scan estimate label (shown under model selector)
         self.estimate_label = QLabel("")
         self.estimate_label.setStyleSheet(
@@ -220,6 +218,9 @@ class ScanPanel(QWidget):
 
         for cb in [self.use_ruff, self.use_bandit, self.use_semgrep, self.use_llm]:
             layout.addWidget(cb)
+
+        # Apply default mode after dependent widgets exist.
+        self._set_scan_mode(self._scan_mode)
 
         # Progress area
         layout.addSpacing(16)
@@ -257,7 +258,8 @@ class ScanPanel(QWidget):
         self._scan_mode = mode if mode in {SCAN_MODE_TURBO, SCAN_MODE_DEEP} else SCAN_MODE_TURBO
         self.turbo_mode_btn.setChecked(self._scan_mode == SCAN_MODE_TURBO)
         self.deep_mode_btn.setChecked(self._scan_mode == SCAN_MODE_DEEP)
-        self._update_estimate()
+        if hasattr(self, "estimate_label") and hasattr(self, "use_llm"):
+            self._update_estimate()
 
     def _update_estimate(self):
         """Refresh the scan time estimate label."""
