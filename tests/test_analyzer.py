@@ -52,3 +52,26 @@ class TestAnalyzer:
         assert analyzer._detect_language(Path("test.js")) == "javascript"
         assert analyzer._detect_language(Path("test.rs")) == "rust"
         assert analyzer._detect_language(Path("test.unknown")) == "code"
+
+    def test_issue_normalization_from_llm_non_string_fields(self):
+        """Issue payloads with list evidence and string line numbers should be normalized."""
+        analyzer = Analyzer(llm_client=None, use_static_tools=False)
+        payload = [{
+            "line_start": "12",
+            "line_end": "14",
+            "severity": "HIGH",
+            "category": "Security",
+            "rule_id": "llm_test",
+            "title": "Potential issue",
+            "description": "Check this branch.",
+            "evidence": ["if user_input:", "execute(query)"],
+        }]
+
+        issues = analyzer._build_issues(payload, Path("sample.py"))
+
+        assert len(issues) == 1
+        assert issues[0].line_start == 12
+        assert issues[0].line_end == 14
+        assert isinstance(issues[0].evidence, str)
+        assert "if user_input:" in issues[0].evidence
+        assert "execute(query)" in issues[0].evidence

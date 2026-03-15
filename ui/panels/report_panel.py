@@ -102,11 +102,13 @@ class ReportPanel(QWidget):
         self._issues_layout = QVBoxLayout(right_widget)
         self._issues_layout.setContentsMargins(16, 16, 16, 16)
         self._issues_layout.setSpacing(12)
+        self._issues_layout.setAlignment(Qt.AlignTop)
         self._issues_layout.addStretch()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(right_widget)
         splitter.addWidget(scroll)
 
