@@ -67,7 +67,7 @@ FixMySlop combines static analysis + LLM reasoning + local privacy in one workfl
 ```bash
 # Base install (CLI + core engine)
 pip install fixmyslop
-#for scaning refer 
+#for scaning refer  [CLI](https://github.com/MrSpideyNihal/FixMySlop/blob/main/README.md#cli-recipes)
 
 # Install with GUI support
 pip install fixmyslop[gui] 
