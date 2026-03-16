@@ -5,9 +5,9 @@ from setuptools import setup, find_packages
 
 setup(
     name="fixmyslop",
-    version="0.2.1",
+    version="0.2.2",
     packages=find_packages(include=["fixmyslop*", "cli*", "core*", "ui*", "utils*"]),
-    py_modules=["main"],
+    py_modules=["main", "macros"],
     python_requires=">=3.10",
     install_requires=[
         "openai>=1.30.0",
