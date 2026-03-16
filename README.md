@@ -62,6 +62,28 @@ FixMySlop combines static analysis + LLM reasoning + local privacy in one workfl
 
 ## Installation
 
+### Install from PyPI
+
+```bash
+# Base install (CLI + core engine)
+pip install fixmyslop
+
+# Install with GUI support
+pip install fixmyslop[gui]
+
+# Install with static analysis tools
+pip install fixmyslop[analysis]
+
+# Install everything
+pip install fixmyslop[gui,analysis]
+```
+
+After install, run:
+
+```bash
+fixmyslop scan ./your-project --mode turbo
+```
+
 ### Prerequisites
 
 - Python 3.10+

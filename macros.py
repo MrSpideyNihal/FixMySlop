@@ -6,7 +6,7 @@ Never hardcode values anywhere else.
 
 # ─── App Identity ───────────────────────────────────────────────────────────
 APP_NAME = "FixMySlop"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 APP_DESCRIPTION = "AI wrote your code. FixMySlop fixes it."
 APP_AUTHOR = "Nihal Rodge"
 APP_LICENSE = "MIT"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fixmyslop"
-version = "0.2.0"
+version = "0.2.1"
 description = "AI wrote your code. FixMySlop fixes it."
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -37,11 +37,19 @@ analysis = ["ruff>=0.4.0", "bandit>=1.7.0"]
 dev = ["pytest>=8.0.0", "pytest-qt>=4.4.0"]
 
 [project.scripts]
-fixmyslop = "main:main"
+fixmyslop = "fixmyslop.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/MrSpideyNihal/FixMySlop"
 Repository = "https://github.com/MrSpideyNihal/FixMySlop"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fixmyslop*", "cli*", "core*", "ui*", "utils*"]
+exclude = ["tests*"]
 
 [tool.ruff]
 line-length = 100
