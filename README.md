@@ -67,9 +67,11 @@ FixMySlop combines static analysis + LLM reasoning + local privacy in one workfl
 ```bash
 # Base install (CLI + core engine)
 pip install fixmyslop
+#for scaning refer 
 
 # Install with GUI support
-pip install fixmyslop[gui]
+pip install fixmyslop[gui] 
+#for using gui - >  fixmyslop gui
 
 # Install with static analysis tools
 pip install fixmyslop[analysis]
@@ -132,6 +134,8 @@ pip install semgrep
 
 ```bash
 python main.py
+or
+fixmyslope gui 
 ```
 
 Main sections:
