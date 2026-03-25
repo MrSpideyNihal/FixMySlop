@@ -67,11 +67,9 @@ FixMySlop combines static analysis + LLM reasoning + local privacy in one workfl
 ```bash
 # Base install (CLI + core engine)
 pip install fixmyslop
-#for scaning refer  [CLI](https://github.com/MrSpideyNihal/FixMySlop/blob/main/README.md#cli-recipes)
 
 # Install with GUI support
-pip install fixmyslop[gui] 
-#for using gui - >  fixmyslop gui
+pip install fixmyslop[gui]
 
 # Install with static analysis tools
 pip install fixmyslop[analysis]
@@ -134,8 +132,8 @@ pip install semgrep
 
 ```bash
 python main.py
-or
-fixmyslope gui 
+# or (after pip install)
+fixmyslop gui
 ```
 
 Main sections:
@@ -177,6 +175,84 @@ python main.py models
 | `turbo` | Prioritize high-impact findings quickly | `~20-40s per file` |
 | `deep` | Broader and more exhaustive finding coverage | `~15-30s per file` |
 | `--no-llm` | Static analysis only | `< 1s per file` |
+
+---
+
+## CLI Reference
+
+### `fixmyslop scan [PATH]`
+
+Scan a codebase for AI debt, bugs, and security issues.
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `PATH` | Repo or folder to scan (default: current directory) |
+
+**Options**
+
+| Option | Short | Type | Description | Default |
+|--------|-------|------|-------------|---------|
+| `--mode` | | `TEXT` | Scan mode: `turbo` (fast, top issues) or `deep` (thorough) | `turbo` |
+| `--model` | `-m` | `TEXT` | Model tag to use for LLM analysis | auto-detected |
+| `--base-url` | `-b` | `TEXT` | Backend API URL | `http://localhost:11434/v1` |
+| `--api-key` | | `TEXT` | API key — use `ollama` for Ollama | `ollama` |
+| `--output` | `-o` | `TEXT` | Report format: `markdown` `html` `json` `csv` `pdf` | `markdown` |
+| `--save` | `-s` | `TEXT` | Save report to a file path | — |
+| `--fix` | | flag | Auto-apply suggested fixes | off |
+| `--no-llm` | | flag | Static analysis only, skip LLM | off |
+| `--retries` | | `INTEGER` | Max LLM retries per file on parse failure | `2` |
+| `--help` | | | Show help and exit | |
+
+**Examples**
+
+```bash
+# Scan current directory (turbo mode, default)
+fixmyslop scan .
+
+# Deep scan and save an HTML report
+fixmyslop scan ./src --mode deep --output html --save report.html
+
+# Static analysis only — no model required, very fast
+fixmyslop scan ./src --no-llm --output json
+
+# Scan with a specific model and auto-apply fixes
+fixmyslop scan . -m qwen2.5-coder:3b --fix
+
+# Turbo scan and save a Markdown report
+fixmyslop scan ./myproject --save slop-report.md --output markdown
+```
+
+---
+
+### `fixmyslop models`
+
+List available models on your running local backend.
+
+**Options**
+
+| Option | Short | Type | Description | Default |
+|--------|-------|------|-------------|---------|
+| `--base-url` | `-b` | `TEXT` | Backend API URL | `http://localhost:11434/v1` |
+| `--help` | | | Show help and exit | |
+
+**Example**
+
+```bash
+fixmyslop models
+fixmyslop models -b http://localhost:11434/v1
+```
+
+---
+
+### `fixmyslop version`
+
+Show the installed FixMySlop version.
+
+```bash
+fixmyslop version
+```
 
 ---
 
@@ -285,6 +361,3 @@ MIT — free forever and open source.
 ---
 
 Loved this project? Please star the repo.
-
-
-
