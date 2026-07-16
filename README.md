@@ -1,4 +1,4 @@
-# FixMySlop
+# FixMySlop - by Nihal & Claude
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
