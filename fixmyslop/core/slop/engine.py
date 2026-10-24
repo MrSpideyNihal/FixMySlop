@@ -23,14 +23,23 @@ from fixmyslop.core.slop.rules_deps import DependencyIndex
 from fixmyslop.core.slop.theme import ThemeIndex
 from fixmyslop.macros import (
     SEVERITY_CRITICAL, SEVERITY_HIGH, SEVERITY_MEDIUM, SEVERITY_LOW, SEVERITY_INFO,
-    SEVERITY_RANK, CATEGORY_UI_SLOP, SLOP_TOOL,
+    SEVERITY_RANK, CATEGORY_UI_SLOP, CATEGORY_SECURITY, SLOP_TOOL,
     MAX_HITS_PER_RULE_PER_FILE, IGNORE_MARKER, IGNORE_FILE_MARKER,
 )
+from fixmyslop.utils.git_utils import git_root
 from fixmyslop.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # ─── Project-level rule metadata (checked in finalize) ──────────────────────
+RULES["sec/missing-gitignore"] = Rule(
+    id="sec/missing-gitignore", title="Missing root .gitignore",
+    severity=SEVERITY_LOW, category=CATEGORY_SECURITY, kinds=frozenset(),
+    why="This Git repository has no root .gitignore. A .gitignore is optional when all project files "
+        "are intended to be versioned.",
+    fix="Consider adding a .gitignore with patterns appropriate for this project. Ignore only files "
+        "that should not be versioned; a .gitignore is optional when all files are intentional.",
+)
 RULES["ui/rainbow-palette"] = Rule(
     id="ui/rainbow-palette", title="Too many accent color families", severity=SEVERITY_MEDIUM,
     category=CATEGORY_UI_SLOP, kinds=frozenset({KIND_MARKUP}),
@@ -264,7 +273,20 @@ class SlopEngine:
                 f"{len(all_hex)} distinct hardcoded colors across the project "
                 f"({len(self._hex_by_file[worst])} in this file)",
             ))
+        issues.extend(self._missing_gitignore_issues())
         return issues
+
+    def _missing_gitignore_issues(self) -> list[Issue]:
+        """Report a missing root ignore file in Git repositories."""
+        rule_id = "sec/missing-gitignore"
+        if not self.config.rule_enabled(rule_id):
+            return []
+        root = git_root(self.root)
+        if root is None or (root / ".gitignore").exists():
+            return []
+        return [self._project_issue(
+            rule_id, str(root / ".gitignore"), 1, "",
+        )]
 
     def _duplicate_issues(self) -> list[Issue]:
         """One issue per extra copy of a function body seen in 2+ places."""

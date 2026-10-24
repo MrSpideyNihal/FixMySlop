@@ -1,8 +1,10 @@
 """Tests for the agent-facing workflow: safe fixes, brief, SARIF, hook, MCP server, init."""
 import io
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from fixmyslop.cli.cli_app import app, run_scan
@@ -40,6 +42,66 @@ def test_run_scan_reports_and_scores(tmp_path):
     rules = {i.rule_id for i in report.issues}
     assert {"ui/ai-gradient", "ui/marketing-slop", "a11y/dead-link", "slop/bare-except"} <= rules
     assert report.grade in "ABCDF" and report.slop_score > 0
+
+
+@pytest.mark.parametrize("has_local_files", [False, True])
+def test_missing_gitignore_advisory_reports_absence_regardless_of_files(tmp_path, has_local_files):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    if has_local_files:
+        (project / ".env").write_text("TOKEN=supersecretvalue\n", encoding="utf-8")
+        (project / "id_ed25519").write_text("private key contents\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+
+    report, _ = run_scan([str(project)], use_static=False)
+    finding = next(i for i in report.issues if i.rule_id == "sec/missing-gitignore")
+
+    assert finding.severity == "LOW"
+    assert finding.file_path.endswith(".gitignore")
+    assert finding.description == (
+        "This Git repository has no root .gitignore. A .gitignore is optional when all project files "
+        "are intended to be versioned."
+    )
+    assert "supersecretvalue" not in finding.description
+    assert "private key contents" not in finding.description
+
+
+def test_missing_gitignore_advisory_not_reported_when_root_ignore_exists(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (project / ".env").write_text("TOKEN=replace-me\n", encoding="utf-8")
+    (project / ".gitignore").write_text(".env\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+
+    report, _ = run_scan([str(project)], use_static=False)
+
+    assert "sec/missing-gitignore" not in {i.rule_id for i in report.issues}
+
+
+def test_missing_gitignore_advisory_is_configurable(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (project / ".fixmyslop.yml").write_text(
+        "disable:\n  - sec/missing-gitignore\n", encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+
+    report, _ = run_scan([str(project)], use_static=False)
+
+    assert "sec/missing-gitignore" not in {i.rule_id for i in report.issues}
+
+
+def test_missing_gitignore_advisory_only_applies_inside_git_repositories(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    report, _ = run_scan([str(project)], use_static=False)
+
+    assert "sec/missing-gitignore" not in {i.rule_id for i in report.issues}
 
 
 def test_safe_fixes_preserve_behavior_and_line_endings(tmp_path):
