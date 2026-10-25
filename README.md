@@ -337,6 +337,7 @@ non-deterministic, so it's off by default — every check above works without it
 ```bash
 pip install -e ".[analysis,dev]"
 pytest -q
+flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --extend-exclude=examples,test_bait.py
 fixmyslop scan . --fail-on medium     # the repo must stay clean
 python screenshots/make_screenshots.py   # regenerate README screenshots
 ```
