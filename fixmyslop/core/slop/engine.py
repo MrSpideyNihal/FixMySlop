@@ -23,22 +23,33 @@ from fixmyslop.core.slop.rules_deps import DependencyIndex
 from fixmyslop.core.slop.theme import ThemeIndex
 from fixmyslop.macros import (
     SEVERITY_CRITICAL, SEVERITY_HIGH, SEVERITY_MEDIUM, SEVERITY_LOW, SEVERITY_INFO,
-    SEVERITY_RANK, CATEGORY_UI_SLOP, CATEGORY_SECURITY, SLOP_TOOL,
+    SEVERITY_RANK, CATEGORY_UI_SLOP, CATEGORY_AI_SMELL, SLOP_TOOL,
     MAX_HITS_PER_RULE_PER_FILE, IGNORE_MARKER, IGNORE_FILE_MARKER,
 )
-from fixmyslop.utils.git_utils import git_root
+from fixmyslop.utils.git_utils import git_root, tracked_files
 from fixmyslop.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # ─── Project-level rule metadata (checked in finalize) ──────────────────────
-RULES["sec/missing-gitignore"] = Rule(
-    id="sec/missing-gitignore", title="Missing root .gitignore",
-    severity=SEVERITY_LOW, category=CATEGORY_SECURITY, kinds=frozenset(),
-    why="This Git repository has no root .gitignore. A .gitignore is optional when all project files "
-        "are intended to be versioned.",
-    fix="Consider adding a .gitignore with patterns appropriate for this project. Ignore only files "
-        "that should not be versioned; a .gitignore is optional when all files are intentional.",
+RULES["slop/committed-artifacts"] = Rule(
+    id="slop/committed-artifacts", title="Generated artifacts are tracked",
+    severity=SEVERITY_LOW, category=CATEGORY_AI_SMELL, kinds=frozenset(),
+    why="Generated, local, or platform-specific artifacts are tracked by Git and can add noise or "
+        "unnecessary size to the repository.",
+    fix="Run `git rm -r --cached <path>` for the affected path(s), then add matching patterns to "
+        "`.gitignore`.",
+)
+
+_COMMITTED_ARTIFACT_KINDS = (
+    ("under node_modules/", lambda parts, name: "node_modules" in parts),
+    ("under .venv/ or venv/", lambda parts, name: bool({".venv", "venv"} & set(parts))),
+    ("under __pycache__/ or matching *.pyc",
+     lambda parts, name: "__pycache__" in parts or name.endswith(".pyc")),
+    ("under dist/, build/, or .next/",
+     lambda parts, name: bool({"dist", "build", ".next"} & set(parts))),
+    ("named .DS_Store", lambda parts, name: name == ".DS_Store"),
+    ("matching *.log", lambda parts, name: name.endswith(".log")),
 )
 RULES["ui/rainbow-palette"] = Rule(
     id="ui/rainbow-palette", title="Too many accent color families", severity=SEVERITY_MEDIUM,
@@ -273,20 +284,37 @@ class SlopEngine:
                 f"{len(all_hex)} distinct hardcoded colors across the project "
                 f"({len(self._hex_by_file[worst])} in this file)",
             ))
-        issues.extend(self._missing_gitignore_issues())
+        issues.extend(self._committed_artifact_issues())
         return issues
 
-    def _missing_gitignore_issues(self) -> list[Issue]:
-        """Report a missing root ignore file in Git repositories."""
-        rule_id = "sec/missing-gitignore"
+    def _committed_artifact_issues(self) -> list[Issue]:
+        """Report tracked generated and local artifacts, grouped by kind."""
+        rule_id = "slop/committed-artifacts"
         if not self.config.rule_enabled(rule_id):
             return []
         root = git_root(self.root)
-        if root is None or (root / ".gitignore").exists():
+        if root is None:
             return []
-        return [self._project_issue(
-            rule_id, str(root / ".gitignore"), 1, "",
-        )]
+        files = tracked_files(root)
+        if files is None:
+            return []
+
+        issues = []
+        for kind, matches in _COMMITTED_ARTIFACT_KINDS:
+            matched = [
+                path for path in files
+                if matches(path.split("/")[:-1], path.rsplit("/", 1)[-1])
+            ]
+            if not matched:
+                continue
+            count = len(matched)
+            noun = "file" if count == 1 else "files"
+            verb = "is" if count == 1 else "are"
+            issues.append(self._project_issue(
+                rule_id, str(root / matched[0]), 1,
+                f"{count} {noun} {kind} {verb} committed",
+            ))
+        return issues
 
     def _duplicate_issues(self) -> list[Issue]:
         """One issue per extra copy of a function body seen in 2+ places."""

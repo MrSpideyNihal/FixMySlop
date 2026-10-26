@@ -14,10 +14,6 @@ import json
 import threading
 import time
 
-# ❌ Missing .gitignore File
-""" a .gitignore file should be used
-to ensure we don't push confendtial files"""
-
 # ❌ Hardcoded secrets everywhere
 API_KEY = "sk-1234567890abcdef"
 DB_PASSWORD = "admin123"

@@ -44,64 +44,104 @@ def test_run_scan_reports_and_scores(tmp_path):
     assert report.grade in "ABCDF" and report.slop_score > 0
 
 
-@pytest.mark.parametrize("has_local_files", [False, True])
-def test_missing_gitignore_advisory_reports_absence_regardless_of_files(tmp_path, has_local_files):
+def test_committed_artifacts_flags_tracked_node_modules(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
-    (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
-    if has_local_files:
-        (project / ".env").write_text("TOKEN=supersecretvalue\n", encoding="utf-8")
-        (project / "id_ed25519").write_text("private key contents\n", encoding="utf-8")
+    artifact = project / "node_modules" / "package" / "index.js"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("module.exports = 1;\n", encoding="utf-8")
     subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", "node_modules"], cwd=project, check=True)
 
     report, _ = run_scan([str(project)], use_static=False)
-    finding = next(i for i in report.issues if i.rule_id == "sec/missing-gitignore")
+    findings = [i for i in report.issues if i.rule_id == "slop/committed-artifacts"]
 
+    assert len(findings) == 1
+    finding = findings[0]
     assert finding.severity == "LOW"
-    assert finding.file_path.endswith(".gitignore")
-    assert finding.description == (
-        "This Git repository has no root .gitignore. A .gitignore is optional when all project files "
-        "are intended to be versioned."
-    )
-    assert "supersecretvalue" not in finding.description
-    assert "private key contents" not in finding.description
+    assert finding.category == "Code Slop"
+    assert "1 file under node_modules/ is committed" in finding.description
+    assert "git rm -r --cached <path>" in finding.suggested_fix
+    assert ".gitignore" in finding.suggested_fix
 
 
-def test_missing_gitignore_advisory_not_reported_when_root_ignore_exists(tmp_path):
+def test_committed_artifacts_clean_repo_without_gitignore_is_not_reported(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
-    (project / ".env").write_text("TOKEN=replace-me\n", encoding="utf-8")
-    (project / ".gitignore").write_text(".env\n", encoding="utf-8")
     subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", "main.py"], cwd=project, check=True)
 
     report, _ = run_scan([str(project)], use_static=False)
 
-    assert "sec/missing-gitignore" not in {i.rule_id for i in report.issues}
+    assert "slop/committed-artifacts" not in {i.rule_id for i in report.issues}
 
 
-def test_missing_gitignore_advisory_is_configurable(tmp_path):
+def test_committed_artifacts_rule_is_configurable(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
-    (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    artifact = project / "node_modules" / "package" / "index.js"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("module.exports = 1;\n", encoding="utf-8")
     (project / ".fixmyslop.yml").write_text(
-        "disable:\n  - sec/missing-gitignore\n", encoding="utf-8",
+        "disable:\n  - slop/committed-artifacts\n", encoding="utf-8",
     )
     subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", "node_modules"], cwd=project, check=True)
 
     report, _ = run_scan([str(project)], use_static=False)
 
-    assert "sec/missing-gitignore" not in {i.rule_id for i in report.issues}
+    assert "slop/committed-artifacts" not in {i.rule_id for i in report.issues}
 
 
-def test_missing_gitignore_advisory_only_applies_inside_git_repositories(tmp_path):
+def test_committed_artifacts_only_applies_inside_git_repositories(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
-    (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    artifact = project / "node_modules" / "package" / "index.js"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("module.exports = 1;\n", encoding="utf-8")
 
     report, _ = run_scan([str(project)], use_static=False)
 
-    assert "sec/missing-gitignore" not in {i.rule_id for i in report.issues}
+    assert "slop/committed-artifacts" not in {i.rule_id for i in report.issues}
+
+
+def test_committed_artifacts_reports_one_counted_finding_per_kind(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    tracked_paths = [
+        "node_modules/a/index.js",
+        "node_modules/b/index.js",
+        ".venv/bin/python",
+        "venv/bin/python",
+        "__pycache__/module.pyc",
+        "src/module.pyc",
+        "dist/app.js",
+        "build/app.js",
+        ".next/app.js",
+        ".DS_Store",
+        "src/.DS_Store",
+        "debug.log",
+        "logs/server.log",
+    ]
+    for name in tracked_paths:
+        path = project / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("artifact\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", *tracked_paths], cwd=project, check=True)
+
+    report, _ = run_scan([str(project)], use_static=False)
+    findings = [i for i in report.issues if i.rule_id == "slop/committed-artifacts"]
+    descriptions = [finding.description for finding in findings]
+
+    assert len(findings) == 6
+    assert any("2 files under node_modules/" in description for description in descriptions)
+    assert any("2 files under .venv/ or venv/" in description for description in descriptions)
+    assert any("2 files under __pycache__/ or matching *.pyc" in description for description in descriptions)
+    assert any("3 files under dist/, build/, or .next/" in description for description in descriptions)
+    assert any("2 files named .DS_Store" in description for description in descriptions)
+    assert any("2 files matching *.log" in description for description in descriptions)
 
 
 def test_safe_fixes_preserve_behavior_and_line_endings(tmp_path):
