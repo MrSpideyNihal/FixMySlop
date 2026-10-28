@@ -1,8 +1,10 @@
 """Tests for the agent-facing workflow: safe fixes, brief, SARIF, hook, MCP server, init."""
 import io
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from fixmyslop.cli.cli_app import app, run_scan
@@ -40,6 +42,129 @@ def test_run_scan_reports_and_scores(tmp_path):
     rules = {i.rule_id for i in report.issues}
     assert {"ui/ai-gradient", "ui/marketing-slop", "a11y/dead-link", "slop/bare-except"} <= rules
     assert report.grade in "ABCDF" and report.slop_score > 0
+
+
+def test_committed_artifacts_flags_tracked_node_modules(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    artifact = project / "node_modules" / "package" / "index.js"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("module.exports = 1;\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", "node_modules"], cwd=project, check=True)
+
+    report, _ = run_scan([str(project)], use_static=False)
+    findings = [i for i in report.issues if i.rule_id == "slop/committed-artifacts"]
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.severity == "LOW"
+    assert finding.category == "Code Slop"
+    assert "1 file under node_modules/ is committed" in finding.description
+    assert "git rm -r --cached <path>" in finding.suggested_fix
+    assert ".gitignore" in finding.suggested_fix
+
+
+def test_committed_artifacts_clean_repo_without_gitignore_is_not_reported(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", "main.py"], cwd=project, check=True)
+
+    report, _ = run_scan([str(project)], use_static=False)
+
+    assert "slop/committed-artifacts" not in {i.rule_id for i in report.issues}
+
+
+def test_committed_artifacts_rule_is_configurable(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    artifact = project / "node_modules" / "package" / "index.js"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("module.exports = 1;\n", encoding="utf-8")
+    (project / ".fixmyslop.yml").write_text(
+        "disable:\n  - slop/committed-artifacts\n", encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", "node_modules"], cwd=project, check=True)
+
+    report, _ = run_scan([str(project)], use_static=False)
+
+    assert "slop/committed-artifacts" not in {i.rule_id for i in report.issues}
+
+
+def test_committed_artifacts_only_applies_inside_git_repositories(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    artifact = project / "node_modules" / "package" / "index.js"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("module.exports = 1;\n", encoding="utf-8")
+
+    report, _ = run_scan([str(project)], use_static=False)
+
+    assert "slop/committed-artifacts" not in {i.rule_id for i in report.issues}
+
+
+def test_committed_artifacts_reports_one_counted_finding_per_kind(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    tracked_paths = [
+        "node_modules/a/index.js",
+        "node_modules/b/index.js",
+        ".venv/bin/python",
+        "venv/bin/python",
+        "__pycache__/module.pyc",
+        "src/module.pyc",
+        "action.yml",
+        "dist/app.js",
+        "build/app.js",
+        ".next/app.js",
+        ".DS_Store",
+        "src/.DS_Store",
+        "debug.log",
+        "logs/server.log",
+        "tests/sample.log",
+        "fixtures/parser.log",
+    ]
+    for name in tracked_paths:
+        path = project / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("artifact\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", *tracked_paths], cwd=project, check=True)
+
+    report, _ = run_scan([str(project)], use_static=False)
+    findings = [i for i in report.issues if i.rule_id == "slop/committed-artifacts"]
+    descriptions = [finding.description for finding in findings]
+
+    assert len(findings) == 6
+    assert any("2 files under node_modules/" in description for description in descriptions)
+    assert any("2 files under .venv/ or venv/" in description for description in descriptions)
+    assert any("2 files under __pycache__/ or matching *.pyc" in description for description in descriptions)
+    assert any("1 file under .next/" in description for description in descriptions)
+    assert any("2 files named .DS_Store" in description for description in descriptions)
+    assert any("2 files matching *.log" in description for description in descriptions)
+
+
+@pytest.mark.parametrize("scan_kind", ["changed", "single_file"])
+def test_committed_artifacts_skipped_for_narrow_scans(tmp_path, scan_kind):
+    project = tmp_path / "project"
+    source = project / "src" / "b.py"
+    artifact = project / "node_modules" / "package" / "index.js"
+    source.parent.mkdir(parents=True)
+    artifact.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    artifact.write_text("module.exports = 1;\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", "src/b.py", "node_modules"], cwd=project, check=True)
+
+    if scan_kind == "changed":
+        report, _ = run_scan([str(project)], changed=True, use_static=False)
+    else:
+        report, _ = run_scan([str(source)], use_static=False)
+
+    assert "slop/committed-artifacts" not in {i.rule_id for i in report.issues}
 
 
 def test_safe_fixes_preserve_behavior_and_line_endings(tmp_path):

@@ -15,7 +15,7 @@ from typing import Optional
 
 from fixmyslop.core.issue import Issue
 from fixmyslop.core.slop.config import SlopConfig, load_config
-from fixmyslop.core.slop.rule import RULES, FileContext, Hit, Rule, KIND_MARKUP, KIND_STYLE, KIND_DOC
+from fixmyslop.core.slop.rule import RULES, FileContext, Hit, Rule, KIND_MARKUP, KIND_STYLE, KIND_DOC, TEST_PATH_RE
 from fixmyslop.core.slop import (  # noqa: F401
     rules_ui, rules_code, rules_security, rules_deps, rules_backend, rules_docs,
 )
@@ -23,14 +23,34 @@ from fixmyslop.core.slop.rules_deps import DependencyIndex
 from fixmyslop.core.slop.theme import ThemeIndex
 from fixmyslop.macros import (
     SEVERITY_CRITICAL, SEVERITY_HIGH, SEVERITY_MEDIUM, SEVERITY_LOW, SEVERITY_INFO,
-    SEVERITY_RANK, CATEGORY_UI_SLOP, SLOP_TOOL,
+    SEVERITY_RANK, CATEGORY_UI_SLOP, CATEGORY_AI_SMELL, SLOP_TOOL,
     MAX_HITS_PER_RULE_PER_FILE, IGNORE_MARKER, IGNORE_FILE_MARKER,
 )
+from fixmyslop.utils.git_utils import git_root, tracked_files
 from fixmyslop.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # ─── Project-level rule metadata (checked in finalize) ──────────────────────
+RULES["slop/committed-artifacts"] = Rule(
+    id="slop/committed-artifacts", title="Generated artifacts are tracked",
+    severity=SEVERITY_LOW, category=CATEGORY_AI_SMELL, kinds=frozenset(),
+    why="Generated, local, or platform-specific artifacts are tracked by Git and can add noise or "
+        "unnecessary size to the repository.",
+    fix="Run `git rm -r --cached <path>` for the affected path(s), then add matching patterns to "
+        "`.gitignore`.",
+)
+
+_COMMITTED_ARTIFACT_KINDS = (
+    ("under node_modules/", lambda parts, name: "node_modules" in parts),
+    ("under .venv/ or venv/", lambda parts, name: bool({".venv", "venv"} & set(parts))),
+    ("under __pycache__/ or matching *.pyc",
+     lambda parts, name: "__pycache__" in parts or name.endswith(".pyc")),
+    ("under .next/", lambda parts, name: bool({".next"} & set(parts))),
+    ("named .DS_Store", lambda parts, name: name == ".DS_Store"),
+    ("matching *.log", lambda parts, name: name.endswith(".log")
+     and not TEST_PATH_RE.search("/".join((*parts, name)))),
+)
 RULES["ui/rainbow-palette"] = Rule(
     id="ui/rainbow-palette", title="Too many accent color families", severity=SEVERITY_MEDIUM,
     category=CATEGORY_UI_SLOP, kinds=frozenset({KIND_MARKUP}),
@@ -94,6 +114,7 @@ class SlopEngine:
         self._hex_by_file: dict[str, set[str]] = defaultdict(set)
         self.lines_scanned = 0
         self.files_scanned = 0
+        self.whole_project = True
 
     @property
     def deps(self) -> DependencyIndex:
@@ -263,6 +284,38 @@ class SlopEngine:
                 "ui/palette-sprawl", worst, 1,
                 f"{len(all_hex)} distinct hardcoded colors across the project "
                 f"({len(self._hex_by_file[worst])} in this file)",
+            ))
+        issues.extend(self._committed_artifact_issues())
+        return issues
+
+    def _committed_artifact_issues(self) -> list[Issue]:
+        """Report tracked generated and local artifacts, grouped by kind."""
+        if not self.whole_project:
+            return []
+        rule_id = "slop/committed-artifacts"
+        if not self.config.rule_enabled(rule_id):
+            return []
+        root = git_root(self.root)
+        if root is None:
+            return []
+        files = tracked_files(root)
+        if files is None:
+            return []
+
+        issues = []
+        for kind, matches in _COMMITTED_ARTIFACT_KINDS:
+            matched = [
+                path for path in files
+                if matches(path.split("/")[:-1], path.rsplit("/", 1)[-1])
+            ]
+            if not matched:
+                continue
+            count = len(matched)
+            noun = "file" if count == 1 else "files"
+            verb = "is" if count == 1 else "are"
+            issues.append(self._project_issue(
+                rule_id, str(root / matched[0]), 1,
+                f"{count} {noun} {kind} {verb} committed",
             ))
         return issues
 

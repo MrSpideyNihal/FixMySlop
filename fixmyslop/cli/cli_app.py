@@ -112,6 +112,7 @@ def run_scan(paths: Optional[list[str]], *, changed: bool = False, base: Optiona
         config.allow(engine.relpath(target))
 
     files = _collect_files(targets, changed, base)
+    engine.whole_project = files is None and not any(t.is_file() for t in targets)
     scan_dir = targets[0] if files is None else root
     scanner = Scanner(str(scan_dir), only_files=files)
     file_list = [f for f in scanner.files() if not config.is_excluded(engine.relpath(f))]

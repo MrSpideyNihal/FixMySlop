@@ -58,6 +58,18 @@ def list_files(directory: Path) -> Optional[list[Path]]:
     return files
 
 
+def tracked_files(directory: Path) -> Optional[list[str]]:
+    """Paths tracked by Git under the repository containing `directory`."""
+    root = git_root(directory)
+    if root is None:
+        return None
+    out = _git(root, "ls-files", "-z")
+    if out is None:
+        logger.warning("Could not list tracked files in Git repository %s", root)
+        return None
+    return [name for name in out.split("\0") if name]
+
+
 def default_base(cwd: Path) -> Optional[str]:
     """Best guess at the branch a PR targets: origin/HEAD, then main/master."""
     out = _git(cwd, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
