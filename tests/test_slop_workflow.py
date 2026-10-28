@@ -116,6 +116,7 @@ def test_committed_artifacts_reports_one_counted_finding_per_kind(tmp_path):
         "venv/bin/python",
         "__pycache__/module.pyc",
         "src/module.pyc",
+        "action.yml",
         "dist/app.js",
         "build/app.js",
         ".next/app.js",
@@ -123,6 +124,8 @@ def test_committed_artifacts_reports_one_counted_finding_per_kind(tmp_path):
         "src/.DS_Store",
         "debug.log",
         "logs/server.log",
+        "tests/sample.log",
+        "fixtures/parser.log",
     ]
     for name in tracked_paths:
         path = project / name
@@ -139,9 +142,29 @@ def test_committed_artifacts_reports_one_counted_finding_per_kind(tmp_path):
     assert any("2 files under node_modules/" in description for description in descriptions)
     assert any("2 files under .venv/ or venv/" in description for description in descriptions)
     assert any("2 files under __pycache__/ or matching *.pyc" in description for description in descriptions)
-    assert any("3 files under dist/, build/, or .next/" in description for description in descriptions)
+    assert any("1 file under .next/" in description for description in descriptions)
     assert any("2 files named .DS_Store" in description for description in descriptions)
     assert any("2 files matching *.log" in description for description in descriptions)
+
+
+@pytest.mark.parametrize("scan_kind", ["changed", "single_file"])
+def test_committed_artifacts_skipped_for_narrow_scans(tmp_path, scan_kind):
+    project = tmp_path / "project"
+    source = project / "src" / "b.py"
+    artifact = project / "node_modules" / "package" / "index.js"
+    source.parent.mkdir(parents=True)
+    artifact.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    artifact.write_text("module.exports = 1;\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    subprocess.run(["git", "add", "src/b.py", "node_modules"], cwd=project, check=True)
+
+    if scan_kind == "changed":
+        report, _ = run_scan([str(project)], changed=True, use_static=False)
+    else:
+        report, _ = run_scan([str(source)], use_static=False)
+
+    assert "slop/committed-artifacts" not in {i.rule_id for i in report.issues}
 
 
 def test_safe_fixes_preserve_behavior_and_line_endings(tmp_path):

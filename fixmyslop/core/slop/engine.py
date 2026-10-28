@@ -15,7 +15,7 @@ from typing import Optional
 
 from fixmyslop.core.issue import Issue
 from fixmyslop.core.slop.config import SlopConfig, load_config
-from fixmyslop.core.slop.rule import RULES, FileContext, Hit, Rule, KIND_MARKUP, KIND_STYLE, KIND_DOC
+from fixmyslop.core.slop.rule import RULES, FileContext, Hit, Rule, KIND_MARKUP, KIND_STYLE, KIND_DOC, TEST_PATH_RE
 from fixmyslop.core.slop import (  # noqa: F401
     rules_ui, rules_code, rules_security, rules_deps, rules_backend, rules_docs,
 )
@@ -46,10 +46,10 @@ _COMMITTED_ARTIFACT_KINDS = (
     ("under .venv/ or venv/", lambda parts, name: bool({".venv", "venv"} & set(parts))),
     ("under __pycache__/ or matching *.pyc",
      lambda parts, name: "__pycache__" in parts or name.endswith(".pyc")),
-    ("under dist/, build/, or .next/",
-     lambda parts, name: bool({"dist", "build", ".next"} & set(parts))),
+    ("under .next/", lambda parts, name: bool({".next"} & set(parts))),
     ("named .DS_Store", lambda parts, name: name == ".DS_Store"),
-    ("matching *.log", lambda parts, name: name.endswith(".log")),
+    ("matching *.log", lambda parts, name: name.endswith(".log")
+     and not TEST_PATH_RE.search("/".join((*parts, name)))),
 )
 RULES["ui/rainbow-palette"] = Rule(
     id="ui/rainbow-palette", title="Too many accent color families", severity=SEVERITY_MEDIUM,
@@ -114,6 +114,7 @@ class SlopEngine:
         self._hex_by_file: dict[str, set[str]] = defaultdict(set)
         self.lines_scanned = 0
         self.files_scanned = 0
+        self.whole_project = True
 
     @property
     def deps(self) -> DependencyIndex:
@@ -289,6 +290,8 @@ class SlopEngine:
 
     def _committed_artifact_issues(self) -> list[Issue]:
         """Report tracked generated and local artifacts, grouped by kind."""
+        if not self.whole_project:
+            return []
         rule_id = "slop/committed-artifacts"
         if not self.config.rule_enabled(rule_id):
             return []
